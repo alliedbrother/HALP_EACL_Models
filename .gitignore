@@ -1,0 +1,52 @@
+# Exclude Data_Sets folder
+Data_Sets/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+venv/
+env/
+ENV/
+molmo_env/
+molmo_rtx/
+
+# Model cache
+model_cache/
+model_cache_*/
+*.pth
+*.bin
+*.safetensors
+
+# Output files
+output/
+test_output/
+embeddings_output/
+*.h5
+*.hdf5
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude
+.claude/
