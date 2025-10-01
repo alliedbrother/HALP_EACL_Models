@@ -1,0 +1,35 @@
+# Requirements for Gemma 3 12B VQA Extraction on GPU
+# Python 3.10+ recommended
+
+# Core dependencies - Transformers 4.50.0+ required for Gemma 3
+torch>=2.1.0
+transformers>=4.50.0
+accelerate>=0.25.0
+einops>=0.7.0
+torchvision>=0.16.0
+
+# Data processing
+pandas>=2.0.0
+numpy>=1.24.0
+h5py>=3.8.0
+Pillow>=10.0.0
+
+# HuggingFace utilities
+huggingface-hub>=0.20.0
+safetensors>=0.4.0
+datasets>=2.16.0
+
+# Tokenization
+sentencepiece>=0.1.99
+
+# Progress and logging
+tqdm>=4.65.0
+
+# CUDA-specific (automatically installed with PyTorch CUDA version)
+# Install PyTorch with CUDA 12.1:
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+
+# Note: Gemma 3 12B requires:
+# - At least 24GB VRAM (RTX 3090/4090, A5000, A6000, or better)
+# - transformers>=4.50.0 (critical for Gemma 3 support)
+# - bfloat16 support on GPU (Ampere architecture or newer)

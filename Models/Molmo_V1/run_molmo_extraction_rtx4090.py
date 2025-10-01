@@ -23,9 +23,9 @@ from transformers import AutoModelForCausalLM, AutoProcessor, GenerationConfig
 from tqdm import tqdm
 import logging
 
-# Setup logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Setup logging - both console and file
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 class MolmoExtractorRTX4090:
@@ -91,7 +91,7 @@ class MolmoExtractorRTX4090:
 
         # Process inputs
         inputs = self.processor.process(images=[image], text=question)
-        inputs = {k: v.to('cuda').unsqueeze(0) if torch.is_tensor(v) else v for k, v in inputs.items()}
+        inputs = {k: v.to('cuda', dtype=torch.bfloat16 if v.dtype in [torch.float32, torch.float16] else v.dtype).unsqueeze(0) if torch.is_tensor(v) else v for k, v in inputs.items()}
 
         # Clone inputs for generation (to avoid corruption)
         gen_inputs = {k: v.clone() if torch.is_tensor(v) else v for k, v in inputs.items()}
@@ -139,16 +139,16 @@ class MolmoExtractorRTX4090:
             # Process image only
             vision_inputs = self.processor.process(images=[image], text="")
 
-            # Move to GPU and add batch dimension
+            # Move to GPU and add batch dimension with correct dtype
             if isinstance(vision_inputs, dict):
                 vision_inputs = {
-                    k: v.to('cuda').unsqueeze(0) if torch.is_tensor(v) and v.dim() in [2, 3]
-                    else v.to('cuda') if torch.is_tensor(v)
+                    k: v.to('cuda', dtype=torch.bfloat16 if v.dtype in [torch.float32, torch.float16] else v.dtype).unsqueeze(0) if torch.is_tensor(v) and v.dim() in [2, 3]
+                    else v.to('cuda', dtype=torch.bfloat16 if v.dtype in [torch.float32, torch.float16] else v.dtype) if torch.is_tensor(v)
                     else v
                     for k, v in vision_inputs.items()
                 }
 
-            with torch.no_grad():
+            with torch.no_grad(), torch.autocast(device_type="cuda", enabled=True, dtype=torch.bfloat16):
                 if 'images' in vision_inputs and 'image_masks' in vision_inputs:
                     images = vision_inputs['images']
                     masks = vision_inputs['image_masks']
@@ -271,16 +271,36 @@ class MolmoExtractorRTX4090:
 
         os.makedirs(output_dir, exist_ok=True)
 
+        # Setup file logging
+        log_file = os.path.join(output_dir, 'molmo_extraction.log')
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(logging.INFO)
+        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+        logger.addHandler(file_handler)
+
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+        logger.addHandler(console_handler)
+
+        logger.info("="*60)
+        logger.info(f"Starting extraction: {len(df)} samples")
+        logger.info(f"Output directory: {output_dir}")
+        logger.info(f"Log file: {log_file}")
+        logger.info("="*60)
+
         # Process samples
         current_batch = {}
         processed_count = 0
+        failed_count = 0
+        start_time = datetime.now()
 
         for idx, row in tqdm(df.iterrows(), total=len(df), desc="Processing VQA"):
             try:
                 question_id = row['question_id']
-                image_id = row['image_id']
+                image_id = row['image_name']
                 question = row['question']
-                gt_answer = row['answer']
+                gt_answer = row['gt_answer']
 
                 # Load image
                 image_path = os.path.join(images_dir, image_id)
@@ -306,6 +326,21 @@ class MolmoExtractorRTX4090:
 
                 processed_count += 1
 
+                # Progress logging every 100 samples
+                if processed_count % 100 == 0:
+                    elapsed = (datetime.now() - start_time).total_seconds()
+                    speed = processed_count / elapsed if elapsed > 0 else 0
+                    eta_seconds = (len(df) - processed_count) / speed if speed > 0 else 0
+                    eta = str(pd.Timedelta(seconds=int(eta_seconds)))
+                    logger.info(f"Progress: {processed_count}/{len(df)} | Speed: {speed:.2f} samples/sec | ETA: {eta} | Failed: {failed_count}")
+
+                # GPU memory logging every 500 samples
+                if processed_count % 500 == 0:
+                    if torch.cuda.is_available():
+                        mem_allocated = torch.cuda.memory_allocated(0) / 1e9
+                        mem_reserved = torch.cuda.memory_reserved(0) / 1e9
+                        logger.info(f"GPU Memory: Allocated={mem_allocated:.2f}GB, Reserved={mem_reserved:.2f}GB")
+
                 # Save checkpoint
                 if processed_count % checkpoint_interval == 0:
                     self._save_checkpoint(current_batch, output_dir, processed_count // checkpoint_interval)
@@ -313,6 +348,7 @@ class MolmoExtractorRTX4090:
                     logger.info(f"Saved checkpoint at {processed_count} samples")
 
             except Exception as e:
+                failed_count += 1
                 logger.error(f"Failed to process {question_id}: {e}")
                 continue
 
@@ -322,7 +358,16 @@ class MolmoExtractorRTX4090:
             self._save_checkpoint(current_batch, output_dir, final_part)
             logger.info(f"Saved final checkpoint with {len(current_batch)} samples")
 
-        logger.info(f"✅ Processing completed! Total: {processed_count} samples")
+        # Final summary
+        total_time = (datetime.now() - start_time).total_seconds()
+        avg_speed = processed_count / total_time if total_time > 0 else 0
+        logger.info("="*60)
+        logger.info(f"✅ Processing completed!")
+        logger.info(f"   Total processed: {processed_count} samples")
+        logger.info(f"   Failed: {failed_count} samples")
+        logger.info(f"   Total time: {pd.Timedelta(seconds=int(total_time))}")
+        logger.info(f"   Average speed: {avg_speed:.2f} samples/sec")
+        logger.info("="*60)
 
     def _save_checkpoint(self, batch_data: Dict, output_dir: str, part_num: int):
         """Save batch to HDF5 file"""
