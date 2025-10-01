@@ -1,0 +1,22 @@
+# Qwen2.5-VL-7B-Instruct VQA Embedding Extractor Requirements
+
+# Core dependencies
+torch>=2.1.0
+torchvision>=0.16.0
+transformers>=4.37.0
+accelerate>=0.29.0
+
+# Vision and image processing
+Pillow>=9.5.0
+qwen-vl-utils>=0.0.3
+
+# Data processing
+numpy>=1.24.0
+pandas>=2.0.0
+h5py>=3.8.0
+
+# Progress and logging
+tqdm>=4.65.0
+
+# Note: Install PyTorch with CUDA support:
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
